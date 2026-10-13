@@ -96,7 +96,7 @@ Qin and co-workers seeded stripes with temporary local chemical potentials, whic
 
 In the t-t′-J model at t′=0.2 and x=0.20, a product-state start "can get stuck" in an unpaired state about 0.001 t/site above the paired one. It escapes only under a temporary pair field ([Jiang, Scalapino & White 2021](https://arxiv.org/abs/2104.10149)).
 
-On width-8 electron-doped cylinders, "the results depend on the starting state." At 1/8 doping, Néel and stripe states are both stable, and the truncation error is still about 10⁻⁴ at D=30,000 ([Shen, Qian & Qin 2024](https://arxiv.org/abs/2404.01979); a Chinese Physics B version is unverified).
+On width-8 electron-doped t-t′-J cylinders, "the results depend on the starting state." At 1/8 doping, Néel and stripe states are both stable, and the truncation error is still about 10⁻⁴ at D=30,000 ([Shen, Qian & Qin 2024](https://arxiv.org/abs/2404.01979); a Chinese Physics B version is unverified).
 
 A 2024 Science study reports that DMRG "can hop among low-lying states depending on the initial condition" and shows "the one with lower energy" ([Xu et al. 2024](https://arxiv.org/abs/2303.08376)).
 
@@ -218,7 +218,7 @@ The first is a 2019 APS March Meeting talk by Marks, Jiang and Devereaux, "Accel
 
 The second is a 2026 "autoresearch" study in which a GPT-based coding agent evolved DMRG protocols under a 20 s budget on chains of length 64. The winning protocols switched to two-site or staged updates, raised the bond dimension and **changed the initial state from random to Néel or ± product states**. That lowered the XXX-chain energy from −28.165820 to −28.175425 ([Mantilla Calderón et al. 2026](https://arxiv.org/abs/2604.25610); numbers from the HTML v2 fetch, not re-checked).
 
-The third is Hamilton-Zero, a ~0.5B-parameter Hamiltonian-conditioned neural tree tensor network. Its zero-shot ground states of quadratic qubit Hamiltonians show median gaps of 4–13% to exact diagonalization, falling to 10⁻³–10⁻²% after fine-tuning. It replaces DMRG rather than seeding it ([Heightman et al. 2026](https://arxiv.org/html/2608.11911)).
+The third is Hamilton-Zero, a ~0.5B-parameter neural tensor-network foundation model pretrained on hundreds of thousands of Hamiltonians. Its zero-shot ground states of quadratic qubit Hamiltonians show median gaps of 4–13% to exact diagonalization, falling to 10⁻³–10⁻²% after fine-tuning. It replaces DMRG rather than seeding it ([Heightman et al. 2026](https://arxiv.org/html/2608.11911)).
 
 ### The reverse direction is mature and carries a cautionary number
 

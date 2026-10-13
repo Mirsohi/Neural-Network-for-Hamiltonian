@@ -1,0 +1,165 @@
+<header class="titleblock">
+  <div class="kicker">Research proposal &middot; draft for discussion</div>
+  <h1>Learning the starting state</h1>
+  <p class="subtitle">Hamiltonian-conditioned neural networks that propose symmetry-resolved MPS seeds for faster and more reliable DMRG ground-state searches</p>
+  <p class="meta">Prepared by Kourosh &middot; 13 October 2026</p>
+</header>
+
+<section class="summary">
+  <h2 class="nonum">Summary</h2>
+  <p>DMRG is the method of choice for ground states of quasi-one-dimensional systems and cylinders, but on wide cylinders and in frustrated, doped and topological problems its outcome depends on the starting MPS. Competing states separated by 10<sup>&minus;3</sup> to 10<sup>&minus;7</sup> per site survive to bond dimensions in the thousands, topological sectors are selected rather than discovered, and practitioners fall back on hand-designed pinning fields and multi-start searches.</p>
+  <p>We propose to train a neural network that takes a Hamiltonian and a target symmetry sector and returns a small set of MPS seeds. From these seeds DMRG should reach the correct ground state more often, and in less total time, than from random, product, mean-field, parton or continuation starts, with all network costs counted. A literature search found no published work that does this and reports measured savings.</p>
+  <p>The project begins with a calibration study that needs no machine learning: how DMRG time-to-solution depends on the quality and basin of the start. That study is publishable on its own, and it tells us where a learned start can pay off before we train anything.</p>
+</section>
+
+<h2>Motivation: when the starting state matters</h2>
+
+<p>DMRG is a local, alternating optimizer {{white1992}}. Because each step only updates one or two site tensors in an environment built from the rest of the MPS, the algorithm &ldquo;can get stuck in a metastable state,&rdquo; and &ldquo;a key way to avoid metastability is to begin with a wavefunction that is already close to the true ground state&rdquo; {{stoudenmire2012}}. The literature shows two distinct ways the start matters, and only the second one justifies a learned initializer.</p>
+
+<p><strong>Missing structure.</strong> A start can lack quantum-number sectors, bond-basis directions or long-range correlations that local updates cannot create. In an extreme test, a 20-site spin-1/2 chain started from an artificial state converged to <i>E</i> = &minus;6.355 instead of &minus;8.682 without subspace enrichment {{hubig2015}}. White&rsquo;s density-matrix noise {{white2005}}, subspace expansion {{hubig2015}} and controlled bond expansion {{gleis2023}} repair this within a few sweeps. In gapped 1D problems a better start therefore buys a constant factor, and schedule and algorithm tuning alone already deliver 2&ndash;6&times; {{hubig2015,sehlstedt2026}}.</p>
+
+<p><strong>Basin selection.</strong> When nearly degenerate states compete, the start decides which one DMRG converges to. The energy differences involved, roughly 10<sup>&minus;3</sup> to 10<sup>&minus;7</sup> per site, are comparable to or smaller than the finite-bond-dimension error, so the optimizer cannot tell the states apart. Table&nbsp;1 collects documented cases. This regime is the target of the proposal.</p>
+
+<table class="data keep">
+  <caption><span class="capnum">Table 1.</span> Documented cases where the starting state changed the converged result, or its cost, in lattice models.</caption>
+  <colgroup><col style="width:27%"><col style="width:61%"><col style="width:12%"></colgroup>
+  <thead><tr><th>System</th><th>What happens</th><th>Ref.</th></tr></thead>
+  <tbody>
+    <tr><td>Doped Hubbard, width-6 cylinders, <i>U</i>/<i>t</i> = 8</td><td>The &lambda; = 5.3 stripe is lower than the &lambda; = 8 stripe at every accessible fixed bond dimension, even at <i>m</i> = 25,000&ndash;30,000. The &lambda; = 8 state wins only after extrapolation and needs a pinning field to survive.</td><td>{{ehlers2017}}</td></tr>
+    <tr><td>Doped Hubbard, 6&times;32 cylinders</td><td>Stripe patterns about 0.001 <i>t</i>/site apart are selected by the pinning pattern. A uniform <i>d</i>-wave state never appears spontaneously.</td><td>{{zheng2017}}</td></tr>
+    <tr><td><i>t</i>-<i>t</i>&prime;-<i>J</i> model, <i>t</i>&prime; = 0.2, <i>x</i> = 0.20</td><td>A product-state start can get stuck in an unpaired state about 0.001 <i>t</i>/site above the paired one. A temporary pair field is needed to escape.</td><td>{{jiang2021}}</td></tr>
+    <tr><td>Electron-doped <i>t</i>-<i>t</i>&prime;-<i>J</i> model, width-8 cylinders</td><td>&ldquo;The results depend on the starting state.&rdquo; N&eacute;el and stripe states are both stable at 1/8 doping at <i>D</i> = 30,000.</td><td>{{shen2024}}</td></tr>
+    <tr><td>Kagome Heisenberg, YC cylinders</td><td>A valence-bond-crystal seed stays metastable up to <i>m</i> &asymp; 2400. On a 400-site YC12 cylinder a near-random start overtakes it only near <i>m</i> &asymp; 2000.</td><td>{{yan2011}}</td></tr>
+    <tr><td>Chiral spin liquids (kagome)</td><td>Real-valued starts forbid spontaneous time-reversal breaking. Random complex starts find the chiral state.</td><td>{{gong2014,he2014}}</td></tr>
+    <tr><td>Haldane-model bosons, infinite DMRG</td><td>Random starts land in each of the two topological sectors in roughly half of the runs.</td><td>{{cincio2013}}</td></tr>
+    <tr><td>Kitaev honeycomb, 6&times;6 cylinder</td><td>Random starts always converge to the wrong flux sector. A Gutzwiller-projected parton seed needs about half the sweeps, reaches about 100&times; lower energy error, and needs bond dimension 6500 instead of 8000.</td><td>{{jin2021}}</td></tr>
+    <tr><td>1D mixed-field Ising; ZXZ+XX chain (<i>N</i> = 32)</td><td>Random product starts give the wrong polarization near a first-order line, and find excited states before all four degenerate ground states.</td><td>{{block2021}}</td></tr>
+    <tr><td>Random-singlet spin chains</td><td>DMRG gets stuck in excited or metastable states and &ldquo;increasing the number of states does not help.&rdquo; Continuation in disorder strength fixes it.</td><td>{{xavier2018}}</td></tr>
+    <tr class="control"><td>Control: Hubbard, width 4</td><td>Random and stripe-pinned starts give the same stripes at <i>m</i> &ge; 4096. Only the run time differs.</td><td>{{jiang2019}}</td></tr>
+  </tbody>
+</table>
+
+<p>Current practice in these problems is a hand-run multi-start search: seed several candidate patterns with product states and temporary fields, extrapolate each run, and keep the lowest {{zheng2017,qin2020}}. A 2024 study notes that DMRG &ldquo;can hop among low-lying states depending on the initial condition&rdquo; {{xu2024}}, and DMRG &ldquo;preferentially converges to one of the quasidegenerate ground states&rdquo; {{samajdar2021}}. The same pattern appears at the frontier of quantum chemistry, where a 2026 FeMoco study sampled 78,750 mean-field guesses to choose 840 DMRG references at 317,440 core-hours per sweep {{zhai2026}}. This enumeration, not the cost of early sweeps, is what a learned model should replace.</p>
+
+<h2>What exists today</h2>
+
+<h3>Algorithmic remedies make results independent of the bond basis, not of the basin</h3>
+<p>Noise, subspace expansion and controlled bond expansion remove the missing-structure failures {{white2005,hubig2015,gleis2023}}, and wavefunction prediction inside each sweep cut Davidson time by 20&ndash;50&times; {{white1996}}. None of these selects a basin. Noise also partly scrambles a good start, which matters when testing any designed seed.</p>
+
+<h3>Physics-designed seeds work, but unevenly</h3>
+<p><strong>Pinning fields and symmetry-broken product states</strong> are standard for competing orders, at the price of biasing the outcome and requiring multi-start checks {{stoudenmire2012}}. <strong>Gaussian (Slater-determinant) MPS</strong> are cheap to build, about 90&nbsp;s on a laptop for a gapless 1025-site chain {{fishman2015}}, but are barely benchmarked as DMRG seeds, and a user report found them worse than random for a 2D Hubbard model {{itensor755}}.</p>
+<p><strong>Gutzwiller-projected parton MPS</strong> are the best-quantified case {{jin2021}}. Three findings from that work shape this proposal. A parton seed that had lost about a quarter of its weight to truncation still worked well. A seed fixed to the right sector but otherwise random gave no gain, so the correlation structure matters and not only the quantum numbers. And in the intermediate-field Kitaev regime no ansatz helped. On the kagome lattice the lowest-energy parton ansatz converged slowest {{sun2024}}, and critical SO(5) and SO(6) chains showed no advantage over random starts {{cai2025}}. The energy or fidelity of a start is therefore a weak predictor of time-to-solution.</p>
+<p><strong>Parameter continuation</strong>, reusing the converged MPS from a neighbouring coupling, is cheap and probably the strongest baseline in smooth regions. It fails across transitions (hysteresis) and offers nothing for a new disorder realization, size or geometry. <strong>Rigorous-RG seeds</strong> fixed the failures in Table&nbsp;1&rsquo;s 1D chains but cost about 500&times; more than DMRG itself {{block2021}}.</p>
+
+<h3>Machine learning has not yet been used to generate DMRG starting states</h3>
+<p>A search covering 2017&ndash;2026 found no paper in which a neural network or other ML model generates the DMRG starting MPS and reports sweep or wall-clock savings. Full-text search coverage was incomplete, so we treat this as likely rather than certain. The closest items are:</p>
+<ul>
+  <li>a 2019 APS March Meeting talk claiming ML-accelerated DMRG convergence, with no method or numbers and no follow-up paper {{marks2019}};</li>
+  <li>a 2026 study in which an LLM coding agent tuned DMRG protocols under a 20&nbsp;s budget and switched the start from random to N&eacute;el-type product states, chosen from a fixed list {{mantilla2026}};</li>
+  <li>Hamilton-Zero, a ~0.5-billion-parameter neural tensor-network foundation model for ground states of quadratic qubit Hamiltonians, pretrained on hundreds of thousands of Hamiltonians, with zero-shot median errors of 4&ndash;13%; it replaces DMRG rather than seeding it {{heightman2026}}.</li>
+</ul>
+<p>The reverse direction, MPS used to pretrain neural quantum states, is well developed and carries a cautionary number: 3&ndash;8&times; fewer optimization steps translated into at most 1.6&times; less wall-clock time {{kan2024}}. Hamiltonian-conditioned neural quantum states exist {{zhang2023,rende2025}}, as do conversion tools between neural and tensor-network states {{chen2018,fernandez2025}}, but none has been used to seed DMRG. The closest successful analogue elsewhere is a network that predicts the density matrix used to start DFT self-consistency {{hazra2024}}.</p>
+
+<h3>What theory allows</h3>
+<p>Finding MPS ground states is hard in the worst case {{eisert2006,schuch2008}}, so no initializer can carry a general guarantee. Isometric MPS energy landscapes have no barren plateaus: the gradient variance is system-size independent and scales as 1/<i>m</i><sup>2</sup> {{barthel2025}}. Random starts therefore fail because of discrete competing basins, not vanishing gradients. Inside the correct basin convergence is roughly geometric, so a start that is ten times closer saves only a handful of sweeps (our inference from local convergence theory). The payoff of a learned start lies in choosing the basin and in amortizing over families of Hamiltonians.</p>
+
+<h2>Objective and hypotheses</h2>
+<p><strong>Objective.</strong> Build and benchmark a model that, given a lattice Hamiltonian and a target symmetry sector, outputs a few MPS seeds from which DMRG (a) reaches the correct ground-state basin with higher probability and (b) reaches a converged answer in less total time than the best non-learned baseline, counting inference, conversion and amortized training.</p>
+<ol class="hyp">
+  <li><strong>H1.</strong> Time-to-solution and reliability are controlled by the basin, sector and correlation pattern of the start, not by its energy or fidelity.</li>
+  <li><strong>H2.</strong> A generator trained on a family of Hamiltonians can propose seeds that land in the correct basin more often than random and physics-designed seeds, at a cost that is repaid after a modest number of instances.</li>
+  <li><strong>H3.</strong> Seeds that carry the correct quantum numbers on every bond make noise-free single-site DMRG, the cheapest variant per sweep, reliable for the final high-bond-dimension sweeps.</li>
+</ol>
+
+<h2>Approach</h2>
+<p>The work is organized in five work packages. WP1 calibrates the problem without any machine learning, WP2 builds the generator shown in Figure&nbsp;1, and WP3&ndash;WP5 test it on progressively harder and larger problem classes.</p>
+<figure>
+{{fig1}}
+<figcaption><span class="capnum">Figure 1.</span> Proposed pipeline. The generator returns several symmetry-resolved seeds, DMRG refines each briefly, and the best is selected by extrapolated energy with a symmetry-restoration check. Converged states and timings feed back as training data.</figcaption>
+</figure>
+
+<h3>WP1. Calibration: how much does the start matter? (no ML)</h3>
+<p>No published study plots sweeps or wall time against start quality for one Hamiltonian, or measures how often random starts get stuck as a function of model, size and algorithm. We will take converged reference states and degrade them in controlled ways: truncation to &chi;<sub>0</sub> &isin; {1, 2, 4, 8, 16}, added noise, and substitution of a wrong-basin state. Each start is run under fixed schedules with two-site DMRG plus noise, single-site DMRG with subspace expansion, and controlled bond expansion, each with and without noise. We record sweeps and wall time to the convergence criteria in Section&nbsp;5, plus the seed-to-seed spread of random starts.</p>
+<p>The result shows whether the dependence is logarithmic, as local theory suggests, or has thresholds at basin boundaries. It bounds the gain any learned start can deliver and tells us which Hamiltonians are worth training on. The harness built here is reused for every later comparison.</p>
+
+<h3>WP2. Generator design</h3>
+<p><strong>Input.</strong> The lattice as a graph (sites, bonds and their couplings, fields), the MPS path through it, global parameters such as filling and cylinder width, and target sector labels: particle number, <i>S</i><sup><i>z</i></sup> or SU(2) label, momentum, spinon parity and chirality sign.</p>
+<p><strong>Output.</strong> <i>K</i> seeds (for example <i>K</i> = 4&ndash;8) with exact quantum-number labels on every bond and complex amplitudes, at modest bond dimension &chi;<sub>0</sub> &le; 32. We will compare three routes, in order of risk:</p>
+<ul>
+  <li><strong>Route A, ansatz parameters (lowest risk).</strong> The network predicts parameters of a physically interpretable state, such as mean-field hoppings and pairings, a flux pattern, or a pinning pattern. The state is converted to an MPS with the Gaussian-MPS construction {{fishman2015}} or Gutzwiller projection {{jin2021}}. This keeps results comparable with the parton literature and should transfer across sizes, but it inherits the ansatz&rsquo;s blind spots.</li>
+  <li><strong>Route B, direct MPS tensors.</strong> A graph or transformer network emits symmetric block-sparse site tensors along the path. The seed&rsquo;s energy is computed exactly by contraction, without Monte Carlo.</li>
+  <li><strong>Route C, via a neural quantum state.</strong> A Hamiltonian-conditioned NQS {{zhang2023,rende2025}} is compressed to an MPS by tensor cross interpolation {{fernandez2025}}. It is the most expressive route and has the costliest conversion.</li>
+</ul>
+<p><strong>Training.</strong> The loss is a sum of local energy terms, since global-fidelity losses produce barren plateaus in MPS-based learning {{liu2022}}. A diversity term keeps the <i>K</i> seeds in different basins, and optional distillation uses DMRG solutions on narrow or short systems. DMRG then runs a short schedule from each seed and keeps the lowest extrapolated energy, which replaces the hand-run multi-start search.</p>
+
+
+<h3>WP3. Basin selection on affordable testbeds</h3>
+<p>We start with problems that have published random-start failures and cheap reference solutions: the mixed-field Ising chain near its first-order line and the ZXZ+XX chain with fourfold edge degeneracy at <i>N</i> = 32 {{block2021}}, and the 6&times;6 Kitaev cylinder, which has published random and Gutzwiller numbers to beat {{jin2021}}. The main metric is the probability of reaching the correct basin or flux sector, followed by time-to-solution and the final bond dimension needed.</p>
+
+<h3>WP4. Competing orders on 2D cylinders</h3>
+<p>The physics payoff is on doped Hubbard and <i>t</i>-<i>J</i> cylinders at 1/8&ndash;1/5 doping, trained on width 4 and tested on widths 6 and 8 {{ehlers2017,jiang2021,shen2024}}, and on kagome and triangular cylinders in both sectors {{yan2011,gong2014}}. The questions are whether learned seeds transfer across widths, where the physics itself changes, and whether they shorten the metastable episodes that burn high-bond-dimension sweeps.</p>
+
+<h3>WP5. Amortization over families (optional)</h3>
+<p>Disorder ensembles (random-bond XXZ and random-singlet chains) and dense parameter scans have many instances and no converged neighbour for a new realization {{xavier2018}}. They are the cleanest test of whether one trained model beats continuation and reduced-basis surrogates {{brehmer2023}}. Quantum chemistry, where orbital ordering dominates, is out of scope for now but is a natural extension.</p>
+
+<h2>Baselines and metrics</h2>
+
+<table class="data">
+  <caption><span class="capnum">Table 2.</span> Baselines a learned start must beat, run with the same DMRG schedule.</caption>
+  <colgroup><col style="width:42%"><col style="width:44%"><col style="width:14%"></colgroup>
+  <thead><tr><th>Baseline</th><th>Why it is strong</th><th>Ref.</th></tr></thead>
+  <tbody>
+    <tr><td>Quantum-number-correct random MPS with a bond-dimension ramp and subspace or controlled bond expansion</td><td>Schedule and algorithm alone give 2&ndash;6&times;</td><td>{{hubig2015,gleis2023,sehlstedt2026}}</td></tr>
+    <tr><td>Best product state (N&eacute;el, &plusmn;, holes at stripe positions)</td><td>Free, and the choice an automated tuner converged to</td><td>{{mantilla2026,jiang2021}}</td></tr>
+    <tr><td>Converged MPS from the nearest parameter point plus a few sweeps</td><td>Likely strongest in smooth regions, and the first thing a referee will ask about</td><td>{{xavier2018}}</td></tr>
+    <tr><td>Reduced-basis or interpolated MPS snapshots</td><td>Non-neural amortization over a parameter domain</td><td>{{brehmer2023}}</td></tr>
+    <tr><td>Gaussian MPS; Gutzwiller parton MPS; rigorous-RG seeds</td><td>Near-free construction, with published random-versus-seeded numbers</td><td>{{fishman2015,jin2021,block2021}}</td></tr>
+    <tr><td>Temporary pinning plus multi-start, compared by extrapolated energy</td><td>Current practice on 2D Hubbard and <i>t</i>-<i>J</i> cylinders</td><td>{{qin2020,stoudenmire2012}}</td></tr>
+  </tbody>
+</table>
+
+<p><strong>Time-to-solution</strong> requires four conditions at once: an energy-variance threshold, an energy extrapolated in truncation error, a converged entanglement entropy, and a converged target correlator. A low variance alone shows only that the state is close to <i>some</i> eigenstate {{itensorfaq}}, and fixed-bond-dimension energies can rank competing states wrongly {{ehlers2017}}.</p>
+<p><strong>Wall time</strong> is reported three ways: without network cost, with inference and MPS conversion, and with training cost amortized over a family. The last gives a break-even number of instances <i>N</i>*. This matters because the reverse-direction pretraining study turned 3&ndash;8&times; fewer iterations into at most 1.6&times; in wall time {{kan2024}}.</p>
+<p><strong>Reliability</strong> is the probability of landing in the correct basin or sector across seeds and instances. We also report the final bond dimension needed, anytime curves of energy error against cumulative time, medians and 90th-percentile tails (benefits should concentrate in hard instances), and results at unseen couplings, larger sizes and wider cylinders.</p>
+<p><strong>Validation.</strong> Runs are done with and without noise. First-order lines are approached from both sides to expose bias. We apply the symmetry-restoration test, since &ldquo;if DMRG restores a symmetry explicitly broken by the initial state, one has strong evidence against that particular ordering scenario&rdquo; {{stoudenmire2012}}. Competing states are always compared by extrapolated, not fixed-<i>m</i>, energies.</p>
+
+<h2>Plan, milestones and deliverables</h2>
+<p>The schedule below is indicative and assumes about one person-year of effort with access to a cluster for large-bond-dimension reference runs. Each gate is a go or no-go decision.</p>
+
+
+<ul>
+  <li><strong>D1</strong> (month 3): an open benchmark harness and a dataset of reference MPS and timings.</li>
+  <li><strong>D2</strong> (month 4): paper 1, a systematic study of how DMRG time-to-solution and reliability depend on the starting state.</li>
+  <li><strong>D3</strong> (month 12): paper 2, learned, sector-conditioned seeds for DMRG, with code.</li>
+</ul>
+<figure>
+{{fig2}}
+<figcaption><span class="capnum">Figure 2.</span> Indicative 12-month plan. Gate A: WP1 shows enough headroom on at least one model class. Gate B: learned seeds beat tuned random starts and continuation on correct-basin probability or total time, including inference. Gate C: seeds trained on narrow cylinders help on wider ones.</figcaption>
+</figure>
+
+<h2>Risks and mitigations</h2>
+<table class="data keep">
+  <caption><span class="capnum">Table 3.</span> Main risks.</caption>
+  <colgroup><col style="width:38%"><col style="width:62%"></colgroup>
+  <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td>Gains are only logarithmic on the chosen models</td><td>WP1 measures this before any training; we then concentrate on basin-selection problems where it is not the case.</td></tr>
+    <tr><td>Noise or bond expansion scrambles a good seed</td><td>Test noise-free single-site and controlled-bond-expansion schedules, and tune schedules separately for seeded runs.</td></tr>
+    <tr><td>The network is confidently wrong in exactly the hard cases</td><td>Output several diverse seeds, select by extrapolated energy, and apply the symmetry-restoration test.</td></tr>
+    <tr><td>Training cost exceeds the savings</td><td>Report the break-even count <i>N</i>* and target families with many instances: scans, disorder ensembles, width series.</td></tr>
+    <tr><td>Seeds do not transfer from width 4 to 6 or 8</td><td>Route A&rsquo;s physically meaningful parameters should transfer better than raw tensors; train on widths 4&ndash;6 and test on 8.</td></tr>
+    <tr><td>Overlooked prior work</td><td>Targeted follow-up before writing up, including contacting the authors of the 2019 APS talk {{marks2019}}.</td></tr>
+  </tbody>
+</table>
+
+<h2>Points to discuss</h2>
+<ol>
+  <li><strong>Target models.</strong> Which systems in Table&nbsp;1 matter most for your current work? Are there problems where you already run multi-start or pinning searches that we could use as test cases?</li>
+  <li><strong>Code base.</strong> ITensor, TeNPy, block2 or an in-house code. We need U(1) and SU(2) symmetries, complex arithmetic, subspace or controlled bond expansion, and access to per-sweep timings.</li>
+  <li><strong>Compute and data.</strong> Cluster access for reference runs, and any converged MPS from past projects that could seed the training set.</li>
+  <li><strong>Division of work.</strong> A possible split: model selection, physical validation and large-<i>m</i> reference runs on one side; the benchmark harness and the generator on the other.</li>
+  <li><strong>Scope of the first paper.</strong> Whether WP1 alone, which needs no ML, is worth publishing early.</li>
+</ol>
+
+<h2 class="nonum">References</h2>
+{{references}}
